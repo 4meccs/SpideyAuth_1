@@ -1,0 +1,45 @@
+{
+  "functions": {
+    "api/*.go": {
+      "runtime": "vercel-go@3.0.3",
+      "maxDuration": 10
+    }
+  },
+  "rewrites": [
+    {
+      "source": "/status",
+      "destination": "/api/status"
+    },
+    {
+      "source": "/:version/auth/:script_id/init",
+      "destination": "/api/auth_init?version=$version&script_id=$script_id"
+    },
+    {
+      "source": "/:version/auth/start/:token",
+      "destination": "/api/auth_start?version=$version&token=$token"
+    },
+    {
+      "source": "/:version/auth/heartbeat",
+      "destination": "/api/heartbeat?version=$version"
+    },
+    {
+      "source": "/wshttpemu",
+      "destination": "/api/websocket"
+    },
+    {
+      "source": "/files/:version/loaders/:script_id.lua",
+      "destination": "/api/loader?version=$version&script_id=$script_id"
+    }
+  ],
+  "headers": [
+    {
+      "source": "/(.*)",
+      "headers": [
+        { "key": "Access-Control-Allow-Origin",  "value": "*" },
+        { "key": "Access-Control-Allow-Methods", "value": "GET, POST, OPTIONS" },
+        { "key": "Access-Control-Allow-Headers", "value": "Content-Type, Authorization" },
+        { "key": "X-Content-Type-Options",       "value": "nosniff" }
+      ]
+    }
+  ]
+}
