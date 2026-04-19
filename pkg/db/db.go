@@ -18,9 +18,9 @@ import (
 // ────────────────────────────────────────────────────────────────────────────
 
 var (
-	supabaseURL     = os.Getenv("SUPABASE_URL")
-	supabaseKey     = os.Getenv("SUPABASE_SERVICE_ROLE_KEY")
-	httpClient      = &http.Client{Timeout: 8 * time.Second}
+	supabaseURL = os.Getenv("SUPABASE_URL")
+	supabaseKey = os.Getenv("SUPABASE_SERVICE_ROLE_KEY")
+	httpClient  = &http.Client{Timeout: 8 * time.Second}
 )
 
 func headers(req *http.Request) {
@@ -219,10 +219,54 @@ func IncrementUses(entryID string) error {
 // Session queries
 // ────────────────────────────────────────────────────────────────────────────
 
-// CreateSession inserts a new session and returns the created row.
+// CreateSession inserts a new session. It uses a raw map payload to ensure
+// compatibility with Supabase PostgREST and bypasses struct marshaling issues.
 func CreateSession(s *Session) error {
-	var rows []Session
-	return post("sessions", s, &rows)
+	payload := map[string]interface{}{
+		"script_id":          s.ScriptID,
+		"license_key":        s.LicenseKey,
+		"session_token":      s.SessionToken,
+		"session_url_token":  s.SessionURLToken,
+		"combined_seed":      0,
+		"hwid":               s.HWID,
+		"nonce2":             s.Nonce2,
+		"server_nonce2_init": s.ServerNonce2Init,
+		"ext_key_1":          s.ExtKey1,
+		"ext_key_3":          s.ExtKey3,
+		"ext_key_5":          s.ExtKey5,
+		"ext_key_7":          s.ExtKey7,
+		"ct1":                s.CT1,
+		"ct2":                s.CT2,
+		"ct3":                s.CT3,
+		"ct4":                s.CT4,
+		"should_terminate":   false,
+	}
+
+	b, err := json.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("failed to marshal session: %w", err)
+	}
+
+	req, err := http.NewRequest("POST", supabaseURL+"/rest/v1/sessions", bytes.NewReader(b))
+	if err != nil {
+		return fmt.Errorf("failed to create request: %w", err)
+	}
+
+	headers(req)
+	req.Header.Set("Prefer", "return=minimal")
+
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("failed to execute request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 300 {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("supabase POST sessions failed (%d): %s", resp.StatusCode, string(body))
+	}
+
+	return nil
 }
 
 // GetSessionByURLToken looks up a session by its URL token (path/query param).
