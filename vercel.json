@@ -1,40 +1,19 @@
 {
-  "functions": {
-    "api/*.go": {
-      "runtime": "@vercel/go@1.0.0",
-      "maxDuration": 10
-    }
-  },
   "rewrites": [
-    {
-      "source": "/status",
-      "destination": "/api/status"
-    },
-    {
-      "source": "/:version/auth/:script_id/init",
-      "destination": "/api/auth_init"
-    },
-    {
-      "source": "/:version/auth/start/:token",
-      "destination": "/api/auth_start"
-    },
-    {
-      "source": "/:version/auth/heartbeat",
-      "destination": "/api/heartbeat"
-    },
-    {
-      "source": "/files/:version/loaders/:script_id.lua",
-      "destination": "/api/loader"
-    }
+    { "source": "/status", "destination": "/api/status" },
+    { "source": "/:version/auth/:script_id/init", "destination": "/api/auth_init" },
+    { "source": "/:version/auth/start/:token", "destination": "/api/auth_start" },
+    { "source": "/:version/auth/heartbeat", "destination": "/api/heartbeat" },
+    { "source": "/files/:version/loaders/:script_id.lua", "destination": "/api/loader" }
   ],
   "headers": [
     {
       "source": "/(.*)",
       "headers": [
-        { "key": "Access-Control-Allow-Origin",  "value": "*" },
+        { "key": "Access-Control-Allow-Origin", "value": "*" },
         { "key": "Access-Control-Allow-Methods", "value": "GET, POST, OPTIONS" },
         { "key": "Access-Control-Allow-Headers", "value": "Content-Type, Authorization" },
-        { "key": "X-Content-Type-Options",       "value": "nosniff" }
+        { "key": "X-Content-Type-Options", "value": "nosniff" }
       ]
     }
   ]
