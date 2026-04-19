@@ -57,6 +57,11 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 	//   [4]  serverNonces[6]  (client's sn[6])
 	//   [5]  serverNonces[4]  (client's sn[4])
 	fields := startCipher.DecodeMessage(t)
+	fmt.Printf("Start Request Fields Count: %d\n", len(fields))
+	for i, f := range fields {
+    	fmt.Printf("Field[%d]: %s\n", i, f)
+	}
+	
 	if len(fields) < 6 {
 		w.Write([]byte("!Malformed start payload"))
 		return
