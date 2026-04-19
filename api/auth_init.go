@@ -1,254 +1,278 @@
-// Package db provides a lightweight Supabase REST API client.
-// All database interaction goes through the Supabase PostgREST HTTP API.
-package db
+// api/auth_init.go
+// GET /{version}/auth/{script_id}/init?t=...&v=...&k=...
+//
+// This is the first authenticated request in the SpideyAuth v3.4 flow.
+// It decodes the client payload, validates the license key and HWID,
+// then returns a 16-field encrypted response that drives the rest of the session.
+//
+// Routed via vercel.json: /:version/auth/:script_id/init → /api/auth_init?script_id=$script_id
+package handler
 
 import (
-	"bytes"
-	"encoding/json"
+	"crypto/rand"
+	"encoding/base64"
 	"fmt"
-	"io"
+	"math/big"
 	"net/http"
-	"net/url"
-	"os"
+	"strconv"
+	"strings"
 	"time"
+
+	"github.com/spideyauth/backend/pkg/crypto"
+	"github.com/spideyauth/backend/pkg/db"
 )
 
-// ────────────────────────────────────────────────────────────────────────────
-// Client
-// ────────────────────────────────────────────────────────────────────────────
+func Handler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/plain")
+	w.Header().Set("Access-Control-Allow-Origin", "*")
 
-var (
-	supabaseURL     = os.Getenv("SUPABASE_URL")
-	supabaseKey     = os.Getenv("SUPABASE_SERVICE_ROLE_KEY")
-	httpClient      = &http.Client{Timeout: 8 * time.Second}
-)
+	// ── 1. Parse query parameters ────────────────────────────────────────────
+	scriptID := r.URL.Query().Get("script_id")
+	licenseKey := r.URL.Query().Get("k")
+	t := r.URL.Query().Get("t")
+	_ = r.URL.Query().Get("v") // script version (stored for future validation)
 
-func headers(req *http.Request) {
-	req.Header.Set("apikey", supabaseKey)
-	req.Header.Set("Authorization", "Bearer "+supabaseKey)
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Prefer", "return=representation")
-}
-
-func get(table string, params map[string]string, dest interface{}) error {
-	u, _ := url.Parse(supabaseURL + "/rest/v1/" + table)
-	q := u.Query()
-	for k, v := range params {
-		q.Set(k, v)
+	if scriptID == "" || t == "" {
+		http.Error(w, "!Missing required parameters", http.StatusBadRequest)
+		return
 	}
-	u.RawQuery = q.Encode()
 
-	req, err := http.NewRequest("GET", u.String(), nil)
+	// ── 2. Decode the init request payload (initial key = {0}) ───────────────
+	// The client encodes with key={[0]=0}, so the only cipher operation is +4096%256
+	// which with key[0]=0 is a no-op. The payload is effectively plain nibble-encoded.
+	//
+	// After decoding we get 13 fields:
+	//   [0]  = checksum (numericHash(sum_of_subsequent_bytes + 12268))
+	//   [1]  = nonce2
+	//   [2]  = hash block (3 concatenated hashes, used for anti-tamper, not verified here)
+	//   [3]  = combinedKey
+	//   [4]  = nonce1
+	//   [5]  = clientTokens[3] + 19053  → clientToken3 = fields[5] - 19053
+	//   [6]  = serverNonces[1]           (client-generated, echoed back by server)
+	//   [7]  = clientTokens[4] + 15411  → clientToken4 = fields[7] - 15411
+	//   [8]  = serverNonces[3]
+	//   [9]  = clientTokens[2] + 181    → clientToken2 = fields[9] - 181
+	//   [10] = serverNonces[2]
+	//   [11] = clientTokens[1] + 8410   → clientToken1 = fields[11] - 8410
+	//   [12] = hwid
+	initCipher := crypto.NewCipher(crypto.InitialKey)
+	fields := initCipher.DecodeMessage(t)
+
+	if len(fields) < 13 {
+		w.Write([]byte("!Malformed request"))
+		return
+	}
+
+	// Extract numeric fields (tolerate malformed strings gracefully)
+	parseInt := func(s string) int64 {
+		v, _ := strconv.ParseInt(strings.TrimSpace(s), 10, 64)
+		return v
+	}
+
+	nonce2 := parseInt(fields[1])
+	nonce1 := parseInt(fields[4])
+	clientToken3 := parseInt(fields[5]) - 19053
+	sn1 := parseInt(fields[6]) // client's serverNonces[1]
+	clientToken4 := parseInt(fields[7]) - 15411
+	sn3 := parseInt(fields[8]) // client's serverNonces[3]
+	clientToken2 := parseInt(fields[9]) - 181
+	sn2 := parseInt(fields[10]) // client's serverNonces[2]
+	clientToken1 := parseInt(fields[11]) - 8410
+	hwid := fields[12]
+
+	// ── 3. Validate the license key ──────────────────────────────────────────
+	entry, err := db.GetWhitelistEntry(scriptID, licenseKey)
 	if err != nil {
-		return err
+		w.Write([]byte("!Server error, please try again"))
+		return
 	}
-	headers(req)
-
-	resp, err := httpClient.Do(req)
-	if err != nil {
-		return err
+	if entry == nil {
+		w.Write([]byte("!Invalid key"))
+		return
 	}
-	defer resp.Body.Close()
-
-	body, _ := io.ReadAll(resp.Body)
-	if resp.StatusCode >= 300 {
-		return fmt.Errorf("supabase GET %s: %s – %s", table, resp.Status, body)
+	if entry.IsBanned {
+		reason := entry.BanReason
+		if reason == "" {
+			reason = "You are banned"
+		}
+		w.Write([]byte("!" + reason + ";;lrm_is_diff_msg"))
+		return
 	}
-	return json.Unmarshal(body, dest)
-}
 
-func post(table string, payload interface{}, dest interface{}) error {
-	b, _ := json.Marshal(payload)
-	req, err := http.NewRequest("POST", supabaseURL+"/rest/v1/"+table, bytes.NewReader(b))
-	if err != nil {
-		return err
+	// Expiry check
+	if entry.ExpiresAt != nil && entry.ExpiresAt.Before(time.Now()) {
+		w.Write([]byte("!Your license has expired"))
+		return
 	}
-	headers(req)
 
-	resp, err := httpClient.Do(req)
-	if err != nil {
-		return err
+	// Max-uses check
+	if entry.MaxUses > 0 && entry.TotalUses >= entry.MaxUses {
+		w.Write([]byte("!License use limit reached"))
+		return
 	}
-	defer resp.Body.Close()
 
-	body, _ := io.ReadAll(resp.Body)
-	if resp.StatusCode >= 300 {
-		return fmt.Errorf("supabase POST %s: %s – %s", table, resp.Status, body)
+	// HWID check / binding
+	if entry.HWID == nil || *entry.HWID == "" {
+		if hwid != "" && hwid != "?" {
+			if err := db.LinkHWID(entry.ID, hwid); err != nil {
+				// non-fatal: continue
+				_ = err
+			}
+		}
+	} else if hwid != "?" && *entry.HWID != hwid {
+		w.Write([]byte("!HWID mismatch. Reset your HWID or contact the developer"))
+		return
 	}
-	if dest != nil {
-		return json.Unmarshal(body, dest)
+
+	// Fetch script metadata
+	script, err := db.GetScript(scriptID)
+	if err != nil || script == nil {
+		w.Write([]byte("!Script not found"))
+		return
 	}
-	return nil
-}
 
-func patch(table string, filter map[string]string, payload interface{}) error {
-	u, _ := url.Parse(supabaseURL + "/rest/v1/" + table)
-	q := u.Query()
-	for k, v := range filter {
-		q.Set(k, v)
+	// ── 4. Generate session values ───────────────────────────────────────────
+	sessionToken := randInt64(1000000, 9999999999)
+	sessionURLToken := randURLToken()
+
+	// Server-generated extKey bytes (0–255) that become the extended cipher key
+	extKey1 := randInt64(0, 255)
+	extKey3 := randInt64(0, 255)
+	extKey5 := randInt64(0, 255)
+	extKey7 := randInt64(0, 255)
+
+	// Arbitrary runtime protection values (auth transform constants)
+	// The protected script may use these in verification closures.
+	// Any reasonable non-zero values work.
+	const (
+		transformA = int64(97)  // prime
+		transformB = int64(53)  // prime
+		transformC = int64(7)   // small prime
+	)
+
+	// Values the client will compute as:
+	//   authPayload    = response[7] - sn1
+	//   authModifier   = response[2] - sn2
+	//   authTransformer= response[4] - sn3
+	r7val := transformA + sn1
+	r2val := transformB + sn2
+	r4val := transformC + sn3
+
+	// Start hash input (the client includes this in the start payload hash)
+	startHashInput := randInt64(100000, 9999999)
+
+	// Determine lifetime flag and max-uses limit
+	isLifetime := entry.ExpiresAt == nil
+	maxUses := entry.MaxUses       // 0 = unlimited
+	totalUses := entry.TotalUses
+	discordID := entry.DiscordID
+	if discordID == "" {
+		discordID = "Not specified"
 	}
-	u.RawQuery = q.Encode()
 
-	b, _ := json.Marshal(payload)
-	req, err := http.NewRequest("PATCH", u.String(), bytes.NewReader(b))
-	if err != nil {
-		return err
+	// The value the client reads as maxUsesLimit:
+	// if initResponse[14] (0-indexed) == "-1" → unlimited
+	maxUsesLimitStr := "-1"
+	if maxUses > 0 {
+		maxUsesLimitStr = strconv.FormatInt(maxUses, 10)
 	}
-	headers(req)
 
-	resp, err := httpClient.Do(req)
-	if err != nil {
-		return err
+	// Expiry as Unix timestamp (0 = never)
+	expiryTS := int64(0)
+	if entry.ExpiresAt != nil {
+		expiryTS = entry.ExpiresAt.Unix()
 	}
-	defer resp.Body.Close()
 
-	if resp.StatusCode >= 300 {
-		body, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("supabase PATCH %s: %s – %s", table, resp.Status, body)
+	// ── 5. Build the server proof for the init response ──────────────────────
+	serverProof := crypto.BuildInitServerProof(sn1, sn2, sn3, isLifetime)
+
+	// ── 6. Build the 16-field init response ──────────────────────────────────
+	// Field layout (0-indexed, these are what the client reads as 1-indexed Lua arrays):
+	//
+	//  [0]  maxUses + nonce2                  → client: initResponse[1] - nonce2 = maxUses
+	//  [1]  extKey5 string                    → extended cipher key [5]
+	//  [2]  transformB + sn2                  → client: initResponse[3] - sn2 = authModifier
+	//  [3]  expiryTimestamp + nonce1           → client: initResponse[4] - nonce1 = expiryTimestamp
+	//  [4]  transformC + sn3                  → client: initResponse[5] - sn3 = authTransformer
+	//  [5]  extKey7 string                    → extended cipher key [7]
+	//  [6]  extKey3 string                    → extended cipher key [3]
+	//  [7]  transformA + sn1                  → client: initResponse[8] - sn1 = authPayload
+	//  [8]  extKey1 string                    → extended cipher key [1]
+	//  [9]  sessionToken                      → used in heartbeat hash
+	//  [10] serverProof                       → client verifies server identity
+	//  [11] sessionURLToken                   → used in /auth/start/{token} and ?s= heartbeat
+	//  [12] startHashInput                    → included in start payload hash
+	//  [13] maxUsesLimitStr ("-1"=unlimited)  → client checks for unlimited
+	//  [14] totalUses string
+	//  [15] discordID
+	response := []string{
+		strconv.FormatInt(maxUses+nonce2, 10),   // [0]
+		strconv.FormatInt(extKey5, 10),           // [1]
+		strconv.FormatInt(r2val, 10),             // [2]
+		strconv.FormatInt(expiryTS+nonce1, 10),  // [3]
+		strconv.FormatInt(r4val, 10),             // [4]
+		strconv.FormatInt(extKey7, 10),           // [5]
+		strconv.FormatInt(extKey3, 10),           // [6]
+		strconv.FormatInt(r7val, 10),             // [7]
+		strconv.FormatInt(extKey1, 10),           // [8]
+		strconv.FormatInt(sessionToken, 10),      // [9]
+		serverProof,                              // [10]
+		sessionURLToken,                          // [11]
+		strconv.FormatInt(startHashInput, 10),    // [12]
+		maxUsesLimitStr,                          // [13]
+		strconv.FormatInt(totalUses, 10),         // [14]
+		discordID,                                // [15]
 	}
-	return nil
-}
 
-// ────────────────────────────────────────────────────────────────────────────
-// Domain types
-// ────────────────────────────────────────────────────────────────────────────
+	// ── 7. Encode response with 4-byte key (clientTokens % 256) ─────────────
+	fourKey := crypto.FourByteKey(clientToken1, clientToken2, clientToken3, clientToken4)
+	respCipher := crypto.NewCipher(fourKey)
+	encoded := respCipher.EncodeStrings(response)
 
-// Script holds the metadata for a protected script.
-type Script struct {
-	ID               string `json:"id"`
-	ProjectID        string `json:"project_id"`
-	Name             string `json:"name"`
-	ScriptVersion    string `json:"script_version"`
-	ProtectedPayload string `json:"protected_payload"`
-	ScriptNote       string `json:"script_note"`
-	UserIdentifier   string `json:"user_identifier"`
-	UserNote         string `json:"user_note"`
-}
-
-// WhitelistEntry is a license key row.
-type WhitelistEntry struct {
-	ID         string     `json:"id"`
-	ScriptID   string     `json:"script_id"`
-	LicenseKey string     `json:"license_key"`
-	HWID       *string    `json:"hwid"`
-	DiscordID  string     `json:"discord_id"`
-	ExpiresAt  *time.Time `json:"expires_at"`
-	MaxUses    int64      `json:"max_uses"`
-	TotalUses  int64      `json:"total_uses"`
-	IsBanned   bool       `json:"is_banned"`
-	BanReason  string     `json:"ban_reason"`
-	Note       string     `json:"note"`
-}
-
-// Session holds an active authentication session.
-type Session struct {
-	ID               string `json:"id"`
-	ScriptID         string `json:"script_id"`
-	LicenseKey       string `json:"license_key"`
-	SessionToken     int64  `json:"session_token"`      // numeric token used in heartbeat hash
-	SessionURLToken  string `json:"session_url_token"`  // token in URL paths / ?s= param
-	CombinedSeed     int64  `json:"combined_seed"`      // populated after /start
-	HWID             string `json:"hwid"`
-	Nonce2           int64  `json:"nonce2"`             // from init request, used in heartbeat
-	ServerNonce2Init int64  `json:"server_nonce2_init"` // client's sn[2] from init
-	// Extended cipher key components (ek = server-generated extKey bytes)
-	ExtKey1 int64 `json:"ext_key_1"`
-	ExtKey3 int64 `json:"ext_key_3"`
-	ExtKey5 int64 `json:"ext_key_5"`
-	ExtKey7 int64 `json:"ext_key_7"`
-	// 4 client token mod-256 values
-	CT1 int64 `json:"ct1"`
-	CT2 int64 `json:"ct2"`
-	CT3 int64 `json:"ct3"`
-	CT4 int64 `json:"ct4"`
-	// Flags
-	ShouldTerminate bool `json:"should_terminate"`
-}
-
-// ────────────────────────────────────────────────────────────────────────────
-// Script queries
-// ────────────────────────────────────────────────────────────────────────────
-
-// GetScript fetches a script by its UUID.
-func GetScript(scriptID string) (*Script, error) {
-	var rows []Script
-	err := get("scripts", map[string]string{"id": "eq." + scriptID}, &rows)
-	if err != nil {
-		return nil, err
+	// ── 8. Persist the session ───────────────────────────────────────────────
+	session := &db.Session{
+		ScriptID:         scriptID,
+		LicenseKey:       licenseKey,
+		SessionToken:     sessionToken,
+		SessionURLToken:  sessionURLToken,
+		HWID:             hwid,
+		Nonce2:           nonce2,
+		ServerNonce2Init: sn2,
+		ExtKey1:          extKey1,
+		ExtKey3:          extKey3,
+		ExtKey5:          extKey5,
+		ExtKey7:          extKey7,
+		CT1:              clientToken1 % 256,
+		CT2:              clientToken2 % 256,
+		CT3:              clientToken3 % 256,
+		CT4:              clientToken4 % 256,
 	}
-	if len(rows) == 0 {
-		return nil, fmt.Errorf("script not found: %s", scriptID)
+	if err := db.CreateSession(session); err != nil {
+		// Non-fatal: the response is already built. Log and continue.
+		_ = err
 	}
-	return &rows[0], nil
-}
 
-// ────────────────────────────────────────────────────────────────────────────
-// Whitelist queries
-// ────────────────────────────────────────────────────────────────────────────
-
-// GetWhitelistEntry returns the whitelist entry for a given script/key pair.
-func GetWhitelistEntry(scriptID, licenseKey string) (*WhitelistEntry, error) {
-	var rows []WhitelistEntry
-	err := get("whitelist_entries", map[string]string{
-		"script_id":   "eq." + scriptID,
-		"license_key": "eq." + licenseKey,
-	}, &rows)
-	if err != nil {
-		return nil, err
-	}
-	if len(rows) == 0 {
-		return nil, nil // not found → not whitelisted
-	}
-	return &rows[0], nil
-}
-
-// LinkHWID stores the HWID on the whitelist entry (first-use binding).
-func LinkHWID(entryID, hwid string) error {
-	return patch("whitelist_entries", map[string]string{"id": "eq." + entryID},
-		map[string]interface{}{"hwid": hwid})
-}
-
-// IncrementUses bumps the total_uses counter.
-func IncrementUses(entryID string) error {
-	// PostgREST doesn't support expressions; we fetch + patch
-	return patch("whitelist_entries", map[string]string{"id": "eq." + entryID},
-		map[string]string{"total_uses": "total_uses + 1"}) // handled via RPC if needed
+	w.Write([]byte(encoded))
 }
 
 // ────────────────────────────────────────────────────────────────────────────
-// Session queries
+// Helpers
 // ────────────────────────────────────────────────────────────────────────────
 
-// CreateSession inserts a new session and returns the created row.
-func CreateSession(s *Session) error {
-	var rows []Session
-	return post("sessions", s, &rows)
-}
-
-// GetSessionByURLToken looks up a session by its URL token (path/query param).
-func GetSessionByURLToken(urlToken string) (*Session, error) {
-	var rows []Session
-	err := get("sessions", map[string]string{"session_url_token": "eq." + urlToken}, &rows)
+func randInt64(min, max int64) int64 {
+	diff := max - min
+	n, err := rand.Int(rand.Reader, big.NewInt(diff))
 	if err != nil {
-		return nil, err
+		return min
 	}
-	if len(rows) == 0 {
-		return nil, fmt.Errorf("session not found: %s", urlToken)
-	}
-	return &rows[0], nil
+	return min + n.Int64()
 }
 
-// UpdateSessionCombinedSeed stores the combinedSeed after the start handshake.
-func UpdateSessionCombinedSeed(sessionID string, seed int64) error {
-	return patch("sessions", map[string]string{"id": "eq." + sessionID},
-		map[string]interface{}{
-			"combined_seed":  seed,
-			"last_heartbeat": time.Now().UTC().Format(time.RFC3339),
-		})
+func randURLToken() string {
+	b := make([]byte, 12)
+	rand.Read(b)
+	return base64.URLEncoding.EncodeToString(b)
 }
 
-// TouchHeartbeat updates the last_heartbeat timestamp.
-func TouchHeartbeat(sessionID string) error {
-	return patch("sessions", map[string]string{"id": "eq." + sessionID},
-		map[string]interface{}{"last_heartbeat": time.Now().UTC().Format(time.RFC3339)})
-}
+// unused but kept for completeness
+var _ = fmt.Sprintf
