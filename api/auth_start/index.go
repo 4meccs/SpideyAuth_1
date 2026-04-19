@@ -58,6 +58,12 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 	//   [4]  serverNonces[6]  (client's sn[6])
 	//   [5]  serverNonces[4]  (client's sn[4])
 	fields := startCipher.DecodeMessage(t)
+	fmt.Printf("=== START REQUEST ===\n")
+	fmt.Printf("Session URL Token: %s\n", urlToken)
+	fmt.Printf("extKey1: %d, extKey3: %d, extKey5: %d, extKey7: %d\n", sess.ExtKey1, sess.ExtKey3, sess.ExtKey5, sess.ExtKey7)
+	fmt.Printf("CT1: %d, CT2: %d, CT3: %d, CT4: %d\n", sess.CT1, sess.CT2, sess.CT3, sess.CT4)
+	extKey := crypto.EightByteKey(sess.CT1, sess.CT2, sess.CT3, sess.CT4, sess.ExtKey1, sess.ExtKey3, sess.ExtKey5, sess.ExtKey7)
+	fmt.Printf("Extended Key: %v\n", extKey)
 	fmt.Printf("Start Request Fields Count: %d\n", len(fields))
 	for i, f := range fields {
     	fmt.Printf("Field[%d]: %s\n", i, f)
