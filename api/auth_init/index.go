@@ -79,7 +79,13 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 	sn2 := parseInt(fields[10]) // client's serverNonces[2]
 	clientToken1 := parseInt(fields[11]) - 8410
 	hwid := fields[12]
-
+	fmt.Printf("=== INIT RESPONSE ===\n")
+	fmt.Printf("extKey1: %d, extKey3: %d, extKey5: %d, extKey7: %d\n", extKey1, extKey3, extKey5, extKey7)
+	fmt.Printf("CT1: %d, CT2: %d, CT3: %d, CT4: %d\n", clientToken1%256, clientToken2%256, clientToken3%256, clientToken4%256)
+	fmt.Printf("Response[1] (extKey5): %s\n", response[1])
+	fmt.Printf("Response[5] (extKey7): %s\n", response[5])
+	fmt.Printf("Response[6] (extKey3): %s\n", response[6])
+	fmt.Printf("Response[8] (extKey1): %s\n", response[8])
 	// ── 3. Validate the license key ──────────────────────────────────────────
 	entry, err := db.GetWhitelistEntry(scriptID, licenseKey)
 	if err != nil {
