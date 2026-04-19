@@ -207,14 +207,14 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 	//  [15] discordID
 	response := []string{
 		strconv.FormatInt(maxUses+nonce2, 10),   // [0]
-		strconv.FormatInt(extKey5, 10),          // [1] ← extKey5 (Lua initResponse[2])
+		string([]byte{byte(extKey5)}), // strconv.FormatInt(extKey5, 10),          // [1] ← extKey5 (Lua initResponse[2])
 		strconv.FormatInt(r2val, 10),            // [2]
 		strconv.FormatInt(expiryTS+nonce1, 10),  // [3]
 		strconv.FormatInt(r4val, 10),            // [4]
-		strconv.FormatInt(extKey7, 10),          // [5] ← extKey7 (Lua initResponse[6])
-		strconv.FormatInt(extKey3, 10),          // [6] ← extKey3 (Lua initResponse[7])
-		strconv.FormatInt(r7val, 10),            // [7]
-		strconv.FormatInt(extKey1, 10),          // [8] ← extKey1 (Lua initResponse[9])
+		string([]byte{byte(extKey7)}), // strconv.FormatInt(extKey7, 10),          // [5] ← extKey7 (Lua initResponse[6])
+		string([]byte{byte(extKey3)}), // strconv.FormatInt(extKey3, 10),          // [6] ← extKey3 (Lua initResponse[7])
+		string([]byte{byte(extKey1)}), // strconv.FormatInt(r7val, 10),            // [7]
+		string(rune(extKey1)) // strconv.FormatInt(extKey1, 10),          // [8] ← extKey1 (Lua initResponse[9])
 		strconv.FormatInt(sessionToken, 10),     // [9]
 		serverProof,                             // [10]
 		sessionURLToken,                         // [11]
