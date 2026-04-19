@@ -15,7 +15,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/spideyauth/backend/pkg/db"
+	"github.com/4meccs/SpideyAuth_1/pkg/db"
 )
 
 func Handler(w http.ResponseWriter, r *http.Request) {
