@@ -1,10 +1,29 @@
 {
   "rewrites": [
-    { "source": "/status", "destination": "/api/status" },
-    { "source": "/:version/auth/:script_id/init", "destination": "/api/auth_init" },
-    { "source": "/:version/auth/start/:token", "destination": "/api/auth_start" },
-    { "source": "/:version/auth/heartbeat", "destination": "/api/heartbeat" },
-    { "source": "/files/:version/loaders/:script_id.lua", "destination": "/api/loader" }
+    {
+      "source": "/status",
+      "destination": "/api/status"
+    },
+    {
+      "source": "/:version/auth/:script_id/init",
+      "destination": "/api/auth_init"
+    },
+    {
+      "source": "/:version/auth/start/:token",
+      "destination": "/api/auth_start"
+    },
+    {
+      "source": "/:version/auth/heartbeat",
+      "destination": "/api/heartbeat"
+    },
+    {
+      "source": "/files/:version/loaders/:script_id.lua",
+      "destination": "/api/loader"
+    },
+    {
+      "source": "/wshttpemu",
+      "destination": "/api/websocket"
+    }
   ],
   "headers": [
     {
