@@ -1,7 +1,7 @@
 {
   "functions": {
     "api/*.go": {
-      "runtime": "vercel-go@3.0.3",
+      "runtime": "@vercel/go@1.0.0",
       "maxDuration": 10
     }
   },
@@ -12,23 +12,19 @@
     },
     {
       "source": "/:version/auth/:script_id/init",
-      "destination": "/api/auth_init?version=$version&script_id=$script_id"
+      "destination": "/api/auth_init"
     },
     {
       "source": "/:version/auth/start/:token",
-      "destination": "/api/auth_start?version=$version&token=$token"
+      "destination": "/api/auth_start"
     },
     {
       "source": "/:version/auth/heartbeat",
-      "destination": "/api/heartbeat?version=$version"
-    },
-    {
-      "source": "/wshttpemu",
-      "destination": "/api/websocket"
+      "destination": "/api/heartbeat"
     },
     {
       "source": "/files/:version/loaders/:script_id.lua",
-      "destination": "/api/loader?version=$version&script_id=$script_id"
+      "destination": "/api/loader"
     }
   ],
   "headers": [
