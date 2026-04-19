@@ -205,6 +205,25 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 	//  [13] maxUsesLimitStr ("-1"=unlimited)  → client checks for unlimited
 	//  [14] totalUses string
 	//  [15] discordID
+response := []string{
+    strconv.FormatInt(maxUses+nonce2, 10),   // [0]
+    strconv.FormatInt(extKey5, 10),          // [1] ← กลับไปใช้ FormatInt
+    strconv.FormatInt(r2val, 10),            // [2]
+    strconv.FormatInt(expiryTS+nonce1, 10),  // [3]
+    strconv.FormatInt(r4val, 10),            // [4]
+    strconv.FormatInt(extKey7, 10),          // [5] ← กลับไปใช้ FormatInt
+    strconv.FormatInt(extKey3, 10),          // [6] ← กลับไปใช้ FormatInt
+    strconv.FormatInt(r7val, 10),            // [7]
+    strconv.FormatInt(extKey1, 10),          // [8] ← กลับไปใช้ FormatInt
+    strconv.FormatInt(sessionToken, 10),     // [9]
+    serverProof,                             // [10]
+    sessionURLToken,                         // [11]
+    strconv.FormatInt(startHashInput, 10),   // [12]
+    maxUsesLimitStr,                         // [13]
+    strconv.FormatInt(totalUses, 10),        // [14]
+    discordID,                               // [15]
+}
+	/*
 	response := []string{
     strconv.FormatInt(maxUses+nonce2, 10),   // [0]
     string([]byte{byte(extKey5)}),           // [1] ← extKey5 (Lua initResponse[2])
