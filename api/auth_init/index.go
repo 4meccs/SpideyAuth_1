@@ -190,14 +190,14 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 	// Field layout (0-indexed, these are what the client reads as 1-indexed Lua arrays):
 	//
 	//  [0]  maxUses + nonce2                  → client: initResponse[1] - nonce2 = maxUses
-	//  [1]  extKey5 string                    → extended cipher key [5]
+	//  [1]  extKey5 string                    → extended cipher key [5] (Lua reads as initResponse[2])
 	//  [2]  transformB + sn2                  → client: initResponse[3] - sn2 = authModifier
-	//  [3]  expiryTimestamp + nonce1           → client: initResponse[4] - nonce1 = expiryTimestamp
+	//  [3]  expiryTimestamp + nonce1          → client: initResponse[4] - nonce1 = expiryTimestamp
 	//  [4]  transformC + sn3                  → client: initResponse[5] - sn3 = authTransformer
-	//  [5]  extKey7 string                    → extended cipher key [7]
-	//  [6]  extKey3 string                    → extended cipher key [3]
+	//  [5]  extKey7 string                    → extended cipher key [7] (Lua reads as initResponse[6])
+	//  [6]  extKey3 string                    → extended cipher key [3] (Lua reads as initResponse[7])
 	//  [7]  transformA + sn1                  → client: initResponse[8] - sn1 = authPayload
-	//  [8]  extKey1 string                    → extended cipher key [1]
+	//  [8]  extKey1 string                    → extended cipher key [1] (Lua reads as initResponse[9])
 	//  [9]  sessionToken                      → used in heartbeat hash
 	//  [10] serverProof                       → client verifies server identity
 	//  [11] sessionURLToken                   → used in /auth/start/{token} and ?s= heartbeat
@@ -207,21 +207,21 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 	//  [15] discordID
 	response := []string{
 		strconv.FormatInt(maxUses+nonce2, 10),   // [0]
-		strconv.FormatInt(extKey5, 10),           // [1]
-		strconv.FormatInt(r2val, 10),             // [2]
+		strconv.FormatInt(extKey5, 10),          // [1] ← extKey5 (Lua initResponse[2])
+		strconv.FormatInt(r2val, 10),            // [2]
 		strconv.FormatInt(expiryTS+nonce1, 10),  // [3]
-		strconv.FormatInt(r4val, 10),             // [4]
-		strconv.FormatInt(extKey7, 10),           // [5]
-		strconv.FormatInt(extKey3, 10),           // [6]
-		strconv.FormatInt(r7val, 10),             // [7]
-		strconv.FormatInt(extKey1, 10),           // [8]
-		strconv.FormatInt(sessionToken, 10),      // [9]
-		serverProof,                              // [10]
-		sessionURLToken,                          // [11]
-		strconv.FormatInt(startHashInput, 10),    // [12]
-		maxUsesLimitStr,                          // [13]
-		strconv.FormatInt(totalUses, 10),         // [14]
-		discordID,                                // [15]
+		strconv.FormatInt(r4val, 10),            // [4]
+		strconv.FormatInt(extKey7, 10),          // [5] ← extKey7 (Lua initResponse[6])
+		strconv.FormatInt(extKey3, 10),          // [6] ← extKey3 (Lua initResponse[7])
+		strconv.FormatInt(r7val, 10),            // [7]
+		strconv.FormatInt(extKey1, 10),          // [8] ← extKey1 (Lua initResponse[9])
+		strconv.FormatInt(sessionToken, 10),     // [9]
+		serverProof,                             // [10]
+		sessionURLToken,                         // [11]
+		strconv.FormatInt(startHashInput, 10),   // [12]
+		maxUsesLimitStr,                         // [13]
+		strconv.FormatInt(totalUses, 10),        // [14]
+		discordID,                               // [15]
 	}
 
 	// ── 7. Encode response with 4-byte key (clientTokens % 256) ─────────────
@@ -260,7 +260,7 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 // ────────────────────────────────────────────────────────────────────────────
 
 func randInt64(min, max int64) int64 {
-	diff := max - min
+	diff := max - min + 1
 	n, err := rand.Int(rand.Reader, big.NewInt(diff))
 	if err != nil {
 		return min
