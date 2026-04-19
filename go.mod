@@ -1,4 +1,4 @@
-module github.com/spideyauth/backend
+module github.com/4meccs/SpideyAuth_1
 
 go 1.21
 
