@@ -214,7 +214,7 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 		string([]byte{byte(extKey7)}), // strconv.FormatInt(extKey7, 10),          // [5] ← extKey7 (Lua initResponse[6])
 		string([]byte{byte(extKey3)}), // strconv.FormatInt(extKey3, 10),          // [6] ← extKey3 (Lua initResponse[7])
 		string([]byte{byte(extKey1)}), // strconv.FormatInt(r7val, 10),            // [7]
-		string(rune(extKey1)) // strconv.FormatInt(extKey1, 10),          // [8] ← extKey1 (Lua initResponse[9])
+		string(rune(extKey1)), // strconv.FormatInt(extKey1, 10),          // [8] ← extKey1 (Lua initResponse[9])
 		strconv.FormatInt(sessionToken, 10),     // [9]
 		serverProof,                             // [10]
 		sessionURLToken,                         // [11]
