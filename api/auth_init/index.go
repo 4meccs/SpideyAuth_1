@@ -136,10 +136,10 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 	sessionURLToken := randURLToken()
 
 	// Server-generated extKey bytes (0–255) that become the extended cipher key
-	extKey1 := randInt64(0, 255)
-	extKey3 := randInt64(0, 255)
-	extKey5 := randInt64(0, 255)
-	extKey7 := randInt64(0, 255)
+	extKey1 := int64(100)
+	extKey3 := int64(101)
+	extKey5 := int64(102)
+	extKey7 := int64(103)
 
 	// Arbitrary runtime protection values (auth transform constants)
 	// The protected script may use these in verification closures.
